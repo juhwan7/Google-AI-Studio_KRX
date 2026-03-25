@@ -8,23 +8,85 @@ export default function App() {
   const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchStatus = async () => {
+  const fetchWithRetry = async (url: string, options: RequestInit = {}, retryCount = 0): Promise<any> => {
     try {
-      const res = await fetch("/api/status");
+      const res = await fetch(url, options);
+      const contentType = res.headers.get("content-type") || "";
+      
+      // If we get HTML instead of JSON, it's likely the platform's "Starting Server" or an error page
+      if (!contentType.includes("application/json")) {
+        const text = await res.text();
+        const lowerText = text.toLowerCase();
+        
+        // Broad detection for any HTML/Platform-level response or server errors
+        const isNotReady = 
+          contentType.includes("text/html") ||
+          lowerText.includes("starting server") || 
+          lowerText.includes("loading") ||
+          lowerText.includes("<!doctype") ||
+          lowerText.includes("<html") ||
+          res.status >= 500 ||
+          res.status === 404; // Sometimes 404 happens briefly during startup
+
+        if (isNotReady && retryCount < 1) {
+          if (retryCount % 1 === 0) {
+            console.log(`[Retry ${retryCount}] Server not ready at ${url} (Status: ${res.status})...`);
+          }
+          await new Promise(resolve => setTimeout(resolve, 200));
+          return fetchWithRetry(url, options, retryCount + 1);
+        }
+        
+        console.error(`Unexpected response from ${url} (Retry: ${retryCount}):`, text.substring(0, 500));
+        throw new Error(`서버 응답이 JSON이 아닙니다 (Status: ${res.status}, Type: ${contentType}). 서버가 아직 준비되지 않았거나 설정 오류가 있습니다.`);
+      }
+      
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP error! status: ${res.status}`);
+      }
+      return data;
+    } catch (err: any) {
+      // If it's a network error (fetch failed), retry as well
+      if (retryCount < 1 && (err.name === 'TypeError' || err.message.includes('fetch'))) {
+        console.log(`[Retry ${retryCount}] Network error at ${url}, retrying...`);
+        await new Promise(resolve => setTimeout(resolve, 200));
+        return fetchWithRetry(url, options, retryCount + 1);
+      }
+      throw err;
+    }
+  };
+
+  const fetchStatus = async (retryCount = 0) => {
+    try {
+      if (retryCount === 0) setError(null);
+      const timestamp = Date.now();
+      console.log(`[${timestamp}] Fetching status...`);
+      
+      const data = await fetchWithRetry(`/api/status?t=${timestamp}`, {}, retryCount);
       setStatus(data);
       setError(null);
-    } catch (err) {
-      setError("서버 연결에 실패했습니다.");
-    } finally {
       setLoading(false);
+    } catch (err: any) {
+      console.error("Fetch status error:", err);
+      // Only show error if we've exhausted retries or it's a real terminal error
+      if (retryCount === 0 || retryCount >= 1) {
+        setError(`연결 실패: ${err.message}`);
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 30000);
-    return () => clearInterval(interval);
+    const timer = setTimeout(() => {
+      fetchStatus();
+    }, 1000);
+
+    const interval = setInterval(() => fetchStatus(0), 30000);
+    
+    return () => {
+      clearTimeout(timer);
+      clearInterval(interval);
+    };
   }, []);
 
   const [testing, setTesting] = useState(false);
@@ -32,16 +94,11 @@ export default function App() {
   const handleTrigger = async () => {
     setTriggering(true);
     try {
-      const res = await fetch("/api/trigger", { method: "POST" });
-      const data = await res.json();
-      if (res.ok) {
-        alert("성공: " + data.message);
-      } else {
-        alert("오류: " + data.error);
-      }
+      const data = await fetchWithRetry("/api/trigger", { method: "POST" });
+      alert("성공: " + data.message);
       fetchStatus();
-    } catch (err) {
-      alert("수동 실행에 실패했습니다.");
+    } catch (err: any) {
+      alert("수동 실행에 실패했습니다: " + err.message);
     } finally {
       setTriggering(false);
     }
@@ -50,15 +107,10 @@ export default function App() {
   const handleTestTelegram = async () => {
     setTesting(true);
     try {
-      const res = await fetch("/api/test-telegram", { method: "POST" });
-      const data = await res.json();
-      if (res.ok) {
-        alert("테스트 메시지 발송 성공! 텔레그램을 확인하세요.");
-      } else {
-        alert("테스트 실패: " + (data.error?.description || data.error));
-      }
-    } catch (err) {
-      alert("테스트 요청 중 오류가 발생했습니다.");
+      const data = await fetchWithRetry("/api/test-telegram", { method: "POST" });
+      alert("테스트 메시지 발송 성공! 텔레그램을 확인하세요.");
+    } catch (err: any) {
+      alert("테스트 실패: " + err.message);
     } finally {
       setTesting(false);
     }
@@ -330,9 +382,17 @@ export default function App() {
       </main>
 
       {error && (
-        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 animate-bounce">
-          <AlertCircle className="w-5 h-5" />
-          {error}
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-4 animate-bounce">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-5 h-5" />
+            {error}
+          </div>
+          <button 
+            onClick={() => { setError(null); setLoading(true); fetchStatus(); }}
+            className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-full text-xs font-bold transition-colors"
+          >
+            다시 시도
+          </button>
         </div>
       )}
     </div>

@@ -11,21 +11,44 @@ import fs from "fs";
 
 dotenv.config();
 
-// Load Firebase config
-const firebaseConfig = JSON.parse(fs.readFileSync("./firebase-applet-config.json", "utf-8"));
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
 
-// Initialize Firebase Admin
-if (!admin.apps.length) {
-  admin.initializeApp({
-    projectId: firebaseConfig.projectId,
-  });
-}
-const db = admin.firestore(firebaseConfig.firestoreDatabaseId);
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
 
+console.log("Starting server initialization...");
 const app = express();
 const PORT = 3000;
 
+let db: admin.firestore.Firestore | null = null;
+
+// Start listening immediately so the port is open and API routes are available
+const server = app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on http://0.0.0.0:${PORT}`);
+});
+
+console.log("NODE_ENV:", process.env.NODE_ENV);
+
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
+
 app.use(express.json());
+
+// API Routes
+app.get("/api/health", (req, res) => {
+  res.json({ 
+    status: "ok", 
+    firebaseInitialized: !!db,
+    env: process.env.NODE_ENV,
+    time: new Date().toISOString()
+  });
+});
 
 // Market Hours: 09:00 - 15:30 KST
 // Cron: Every 30 minutes from 09:30 to 15:30
@@ -99,6 +122,10 @@ async function fetchProgramData(sosok: number) {
 
 async function runSnapshot() {
   try {
+    if (!db) {
+      console.error("runSnapshot failed: Firebase not initialized.");
+      return;
+    }
     const kospiData = await fetchMarketData(0);
     const kospiProgram = await fetchProgramData(0);
     const kosdaqData = await fetchMarketData(1);
@@ -127,6 +154,11 @@ async function sendTelegramNotification(current: any) {
 
   if (!botToken || !chatId) {
     console.warn("Telegram Bot Token or Chat ID not configured.");
+    return;
+  }
+
+  if (!db) {
+    console.error("sendTelegramNotification failed: Firebase not initialized.");
     return;
   }
 
@@ -187,7 +219,16 @@ async function sendTelegramNotification(current: any) {
 
 // API Routes
 app.get("/api/status", async (req, res) => {
+  console.log(`[${new Date().toISOString()}] Handling /api/status request`);
   try {
+    if (!db) {
+      console.warn("Firestore not initialized, returning 503");
+      return res.status(503).json({ 
+        status: "error", 
+        error: "Firebase not initialized. Check server logs.",
+        botConfigured: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID)
+      });
+    }
     const querySnapshot = await db.collection("snapshots")
       .orderBy("timestamp", "desc")
       .limit(1)
@@ -236,24 +277,75 @@ app.post("/api/test-telegram", async (req, res) => {
   }
 });
 
-async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-  }
+// Global error handler
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error("Express Global Error:", err);
+  res.status(500).json({ error: "Internal Server Error", details: err.message });
+});
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+async function initializeFirebase() {
+  try {
+    const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+    if (fs.existsSync(configPath)) {
+      const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      
+      if (!admin.apps.length) {
+        admin.initializeApp({
+          credential: admin.credential.applicationDefault(),
+          projectId: firebaseConfig.projectId,
+        });
+      }
+      
+      db = admin.firestore();
+      // Use the specific database ID if provided in the config
+      if (firebaseConfig.firestoreDatabaseId) {
+        db = admin.firestore(firebaseConfig.firestoreDatabaseId);
+      }
+      
+      console.log("Firebase Admin initialized successfully.");
+    } else {
+      console.warn("firebase-applet-config.json not found. Firebase features will be disabled.");
+    }
+  } catch (error) {
+    console.error("Error initializing Firebase Admin:", error);
+  }
 }
 
-startServer();
+async function setupMiddleware() {
+  console.log("Setting up middleware and starting server...");
+  
+  await initializeFirebase();
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log("Configuring Vite middleware...");
+    try {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+      console.log("Vite middleware attached.");
+    } catch (viteError) {
+      console.error("Failed to start Vite server:", viteError);
+    }
+  } else {
+    console.log("Configuring production static file serving...");
+    const distPath = path.join(process.cwd(), "dist");
+    if (fs.existsSync(distPath)) {
+      app.use(express.static(distPath));
+      app.get("*", (req, res) => {
+        if (!req.url.startsWith("/api/")) {
+          res.sendFile(path.join(distPath, "index.html"));
+        } else {
+          res.status(404).json({ error: "API route not found" });
+        }
+      });
+      console.log("Static files configured at:", distPath);
+    } else {
+      console.warn("WARNING: dist folder not found. Static file serving may fail.");
+    }
+  }
+}
+
+// Initial setup
+setupMiddleware();
