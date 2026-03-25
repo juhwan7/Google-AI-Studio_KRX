@@ -28,11 +28,11 @@ export default function App() {
           res.status >= 500 ||
           res.status === 404; // Sometimes 404 happens briefly during startup
 
-        if (isNotReady && retryCount < 1) {
+        if (isNotReady && retryCount < 5) {
           if (retryCount % 1 === 0) {
             console.log(`[Retry ${retryCount}] Server not ready at ${url} (Status: ${res.status})...`);
           }
-          await new Promise(resolve => setTimeout(resolve, 200));
+          await new Promise(resolve => setTimeout(resolve, 1000));
           return fetchWithRetry(url, options, retryCount + 1);
         }
         
@@ -47,9 +47,9 @@ export default function App() {
       return data;
     } catch (err: any) {
       // If it's a network error (fetch failed), retry as well
-      if (retryCount < 1 && (err.name === 'TypeError' || err.message.includes('fetch'))) {
+      if (retryCount < 5 && (err.name === 'TypeError' || err.message.includes('fetch'))) {
         console.log(`[Retry ${retryCount}] Network error at ${url}, retrying...`);
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 1000));
         return fetchWithRetry(url, options, retryCount + 1);
       }
       throw err;
@@ -68,11 +68,8 @@ export default function App() {
       setLoading(false);
     } catch (err: any) {
       console.error("Fetch status error:", err);
-      // Only show error if we've exhausted retries or it's a real terminal error
-      if (retryCount === 0 || retryCount >= 1) {
-        setError(`연결 실패: ${err.message}`);
-        setLoading(false);
-      }
+      setError(`연결 실패: ${err.message}`);
+      setLoading(false);
     }
   };
 
@@ -373,7 +370,9 @@ export default function App() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-white/60">DB 연결</span>
-                  <span className="text-sm font-medium text-emerald-400">Firestore OK</span>
+                  <span className="text-sm font-medium text-emerald-400">
+                    {status?.status === 'running' ? `Firestore OK (${status.databaseId || 'default'})` : '연결 실패'}
+                  </span>
                 </div>
               </div>
             </div>

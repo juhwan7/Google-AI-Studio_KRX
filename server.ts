@@ -4,6 +4,7 @@ import axios from "axios";
 import * as cheerio from "cheerio";
 import cron from "node-cron";
 import admin from "firebase-admin";
+import { getFirestore } from "firebase-admin/firestore";
 import { formatInTimeZone } from "date-fns-tz";
 import path from "path";
 import dotenv from "dotenv";
@@ -229,20 +230,40 @@ app.get("/api/status", async (req, res) => {
         botConfigured: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID)
       });
     }
-    const querySnapshot = await db.collection("snapshots")
-      .orderBy("timestamp", "desc")
-      .limit(1)
-      .get();
+
+    const dbId = (db as any)._databaseId || "unknown";
+    console.log(`[${new Date().toISOString()}] Attempting to fetch latest snapshot from Firestore (DB: ${dbId})...`);
+    
+    // Try a simpler query first if the complex one fails
+    let querySnapshot;
+    try {
+      querySnapshot = await db.collection("snapshots")
+        .orderBy("timestamp", "desc")
+        .limit(1)
+        .get();
+      console.log(`Successfully fetched latest snapshot from ${dbId}. Empty: ${querySnapshot.empty}`);
+    } catch (queryError: any) {
+      console.error(`Complex query failed on ${dbId}, trying simple query:`, queryError.message);
+      // Fallback to simple query without orderBy to see if it's an index issue
+      querySnapshot = await db.collection("snapshots").limit(1).get();
+      console.log(`Simple query result on ${dbId}. Empty: ${querySnapshot.empty}`);
+    }
     
     const latestSnapshot = querySnapshot.empty ? null : querySnapshot.docs[0].data();
 
     res.json({ 
       status: "running", 
       botConfigured: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID),
-      latestSnapshot
+      latestSnapshot,
+      databaseId: dbId
     });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch status" });
+  } catch (error: any) {
+    console.error("Status fetch error details:", error);
+    res.status(500).json({ 
+      error: `Failed to fetch status: ${error.message}`, 
+      details: error.message,
+      stack: error.stack 
+    });
   }
 });
 
@@ -290,19 +311,67 @@ async function initializeFirebase() {
       const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
       
       if (!admin.apps.length) {
+        console.log(`Initializing Firebase Admin with Project ID from config: ${firebaseConfig.projectId}`);
+        console.log("Environment Project IDs:", {
+          PROJECT_ID: process.env.PROJECT_ID,
+          GOOGLE_CLOUD_PROJECT: process.env.GOOGLE_CLOUD_PROJECT,
+          FIREBASE_CONFIG: process.env.FIREBASE_CONFIG ? "exists" : "missing"
+        });
+        
+        // In AI Studio, we should prioritize the project ID from the config
         admin.initializeApp({
-          credential: admin.credential.applicationDefault(),
           projectId: firebaseConfig.projectId,
         });
       }
       
-      db = admin.firestore();
-      // Use the specific database ID if provided in the config
+      // Try to use the named database first
       if (firebaseConfig.firestoreDatabaseId) {
-        db = admin.firestore(firebaseConfig.firestoreDatabaseId);
+        try {
+          console.log(`Attempting to connect to named database: ${firebaseConfig.firestoreDatabaseId}`);
+          const namedDb = getFirestore(firebaseConfig.firestoreDatabaseId);
+          // Test if the named database exists and is accessible
+          await namedDb.collection("snapshots").limit(1).get();
+          db = namedDb;
+          console.log(`Successfully connected to named Firestore database: ${firebaseConfig.firestoreDatabaseId}`);
+        } catch (dbError: any) {
+          console.warn(`Named database ${firebaseConfig.firestoreDatabaseId} failed or not found:`, dbError.message);
+          console.log("Falling back to default database...");
+          db = getFirestore();
+        }
+      } else {
+        console.log("No named database ID provided, using default database.");
+        db = getFirestore();
       }
       
-      console.log("Firebase Admin initialized successfully.");
+      // Final verification of the selected database
+      try {
+        const testSnapshot = await db.collection("snapshots").limit(1).get();
+        const activeDbId = (db as any)._databaseId || "(default)";
+        console.log(`Firestore connection verified on database: ${activeDbId}. Empty: ${testSnapshot.empty}`);
+      } catch (finalError: any) {
+        console.error("Final Firestore connection test failed:", finalError.message);
+        
+        // If even the fallback failed, try to re-initialize with environment project ID if different
+        const envProjectId = process.env.PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
+        if (envProjectId && envProjectId !== firebaseConfig.projectId) {
+          console.log(`Emergency: Trying environment project ID: ${envProjectId}`);
+          try {
+            // We can't easily re-initialize the default app with a different project ID in firebase-admin
+            // but we can create a secondary app
+            if (!admin.apps.find(a => a?.name === "emergency")) {
+              const emergencyApp = admin.initializeApp({
+                projectId: envProjectId,
+              }, "emergency");
+              const emergencyDb = getFirestore(emergencyApp);
+              await emergencyDb.collection("snapshots").limit(1).get();
+              db = emergencyDb;
+              console.log(`Emergency: Successfully connected to database in environment project: ${envProjectId}`);
+            }
+          } catch (emergencyError: any) {
+            console.error("Emergency fallback also failed:", emergencyError.message);
+          }
+        }
+      }
     } else {
       console.warn("firebase-applet-config.json not found. Firebase features will be disabled.");
     }
