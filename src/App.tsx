@@ -246,19 +246,31 @@ export default function App() {
                     <div className="grid grid-cols-2 gap-4">
                       <div className="bg-white/5 rounded-xl p-4">
                         <div className="text-[10px] text-white/40 uppercase mb-1">개인</div>
-                        <div className="text-lg font-mono">{(latest.kospi.individual / 100).toFixed(0)}<span className="text-xs ml-1 text-white/30">억</span></div>
+                        <div className="text-lg font-mono">
+                          {latest.kospi.individual !== null ? (latest.kospi.individual / 100).toFixed(0) : "N/A"}
+                          <span className="text-xs ml-1 text-white/30">억</span>
+                        </div>
                       </div>
                       <div className="bg-white/5 rounded-xl p-4">
                         <div className="text-[10px] text-white/40 uppercase mb-1">외국인</div>
-                        <div className="text-lg font-mono">{(latest.kospi.foreign / 100).toFixed(0)}<span className="text-xs ml-1 text-white/30">억</span></div>
+                        <div className="text-lg font-mono">
+                          {latest.kospi.foreign !== null ? (latest.kospi.foreign / 100).toFixed(0) : "N/A"}
+                          <span className="text-xs ml-1 text-white/30">억</span>
+                        </div>
                       </div>
                       <div className="bg-white/5 rounded-xl p-4">
                         <div className="text-[10px] text-white/40 uppercase mb-1">기관</div>
-                        <div className="text-lg font-mono">{(latest.kospi.institutional / 100).toFixed(0)}<span className="text-xs ml-1 text-white/30">억</span></div>
+                        <div className="text-lg font-mono">
+                          {latest.kospi.institutional !== null ? (latest.kospi.institutional / 100).toFixed(0) : "N/A"}
+                          <span className="text-xs ml-1 text-white/30">억</span>
+                        </div>
                       </div>
                       <div className="bg-white/5 rounded-xl p-4 border border-blue-500/20">
                         <div className="text-[10px] text-blue-400/60 uppercase mb-1">비차익</div>
-                        <div className="text-lg font-mono">{(latest.kospi.program_non_arbitrage / 100).toFixed(0)}<span className="text-xs ml-1 text-white/30">억</span></div>
+                        <div className="text-lg font-mono">
+                          {latest.kospi.program_non_arbitrage !== null ? (latest.kospi.program_non_arbitrage / 100).toFixed(0) : "N/A"}
+                          <span className="text-xs ml-1 text-white/30">억</span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -272,19 +284,31 @@ export default function App() {
                     <div className="grid grid-cols-2 gap-4">
                       <div className="bg-white/5 rounded-xl p-4">
                         <div className="text-[10px] text-white/40 uppercase mb-1">개인</div>
-                        <div className="text-lg font-mono">{(latest.kosdaq.individual / 100).toFixed(0)}<span className="text-xs ml-1 text-white/30">억</span></div>
+                        <div className="text-lg font-mono">
+                          {latest.kosdaq.individual !== null ? (latest.kosdaq.individual / 100).toFixed(0) : "N/A"}
+                          <span className="text-xs ml-1 text-white/30">억</span>
+                        </div>
                       </div>
                       <div className="bg-white/5 rounded-xl p-4">
                         <div className="text-[10px] text-white/40 uppercase mb-1">외국인</div>
-                        <div className="text-lg font-mono">{(latest.kosdaq.foreign / 100).toFixed(0)}<span className="text-xs ml-1 text-white/30">억</span></div>
+                        <div className="text-lg font-mono">
+                          {latest.kosdaq.foreign !== null ? (latest.kosdaq.foreign / 100).toFixed(0) : "N/A"}
+                          <span className="text-xs ml-1 text-white/30">억</span>
+                        </div>
                       </div>
                       <div className="bg-white/5 rounded-xl p-4">
                         <div className="text-[10px] text-white/40 uppercase mb-1">기관</div>
-                        <div className="text-lg font-mono">{(latest.kosdaq.institutional / 100).toFixed(0)}<span className="text-xs ml-1 text-white/30">억</span></div>
+                        <div className="text-lg font-mono">
+                          {latest.kosdaq.institutional !== null ? (latest.kosdaq.institutional / 100).toFixed(0) : "N/A"}
+                          <span className="text-xs ml-1 text-white/30">억</span>
+                        </div>
                       </div>
                       <div className="bg-white/5 rounded-xl p-4 border border-orange-500/20">
                         <div className="text-[10px] text-orange-400/60 uppercase mb-1">비차익</div>
-                        <div className="text-lg font-mono">{(latest.kosdaq.program_non_arbitrage / 100).toFixed(0)}<span className="text-xs ml-1 text-white/30">억</span></div>
+                        <div className="text-lg font-mono">
+                          {latest.kosdaq.program_non_arbitrage !== null ? (latest.kosdaq.program_non_arbitrage / 100).toFixed(0) : "N/A"}
+                          <span className="text-xs ml-1 text-white/30">억</span>
+                        </div>
                       </div>
                     </div>
                   </div>

@@ -69,6 +69,8 @@ cron.schedule("0,30 9-15 * * 1-5", async () => {
 });
 
 async function fetchMarketData(sosok: number) {
+  const marketName = sosok === 0 ? 'KOSPI' : 'KOSDAQ';
+  console.log(`[FETCH] Starting market data fetch for ${marketName}...`);
   try {
     // sosok=0: KOSPI, sosok=1: KOSDAQ
     const url = `https://finance.naver.com/sise/sise_trans_style.naver?sosok=${sosok}`;
@@ -76,34 +78,68 @@ async function fetchMarketData(sosok: number) {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
       },
-      responseType: 'arraybuffer'
+      responseType: 'arraybuffer',
+      timeout: 10000
     });
     
     const html = new TextDecoder('euc-kr').decode(data);
     const $ = cheerio.load(html);
 
     const row = $("table.type_1 tbody tr").filter((i, el) => $(el).find("td").length > 3).first();
-    const individual = parseInt(row.find("td").eq(1).text().replace(/[^0-9-]/g, "")) || 0;
-    const foreign = parseInt(row.find("td").eq(2).text().replace(/[^0-9-]/g, "")) || 0;
-    const institutional = parseInt(row.find("td").eq(3).text().replace(/[^0-9-]/g, "")) || 0;
+    
+    if (!row.length) {
+      console.error(`[ERROR] No data row found in HTML for ${marketName}. Check if Naver Finance page structure has changed.`);
+      return { individual: null, foreign: null, institutional: null };
+    }
 
-    console.log(`Fetched Market Data (${sosok === 0 ? 'KOSPI' : 'KOSDAQ'}):`, { individual, foreign, institutional });
+    const parseVal = (index: number, name: string) => {
+      try {
+        const cell = row.find("td").eq(index);
+        if (!cell.length) {
+          console.error(`[ERROR] Failed to find ${marketName} ${name} data cell at index ${index}`);
+          return null;
+        }
+        const text = cell.text().replace(/[^0-9-]/g, "");
+        if (!text) {
+          console.warn(`[WARN] Empty ${name} data for ${marketName} at index ${index}`);
+          return null;
+        }
+        const val = parseInt(text);
+        if (isNaN(val)) {
+          console.error(`[ERROR] Failed to parse ${marketName} ${name} value: "${text}"`);
+          return null;
+        }
+        return val;
+      } catch (e: any) {
+        console.error(`[ERROR] Exception while parsing ${marketName} ${name} data:`, e.message);
+        return null;
+      }
+    };
+
+    const individual = parseVal(1, 'individual');
+    const foreign = parseVal(2, 'foreign');
+    const institutional = parseVal(3, 'institutional');
+
+    console.log(`[SUCCESS] Fetched Market Data (${marketName}):`, { individual, foreign, institutional });
     return { individual, foreign, institutional };
-  } catch (error) {
-    console.error(`Error fetching market data for sosok ${sosok}:`, error);
-    throw error;
+  } catch (error: any) {
+    console.error(`[FATAL] Error fetching market data for ${marketName}:`, error.message);
+    return { individual: null, foreign: null, institutional: null };
   }
 }
 
 async function fetchProgramData(sosok: number) {
+  const marketName = sosok === 0 ? 'KOSPI' : 'KOSDAQ';
+  console.log(`[FETCH] Starting program data fetch for ${marketName}...`);
   try {
     // sosok=0: KOSPI, sosok=1: KOSDAQ
-    const url = `https://finance.naver.com/sise/sise_program.naver?sosok=${sosok === 0 ? 'KOSPI' : 'KOSDAQ'}`;
+    const url = `https://finance.naver.com/sise/sise_program.naver?sosok=${marketName}`;
     const { data } = await axios.get(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
       },
-      responseType: 'arraybuffer'
+      responseType: 'arraybuffer',
+      timeout: 10000
     });
     const html = new TextDecoder('euc-kr').decode(data);
     const $ = cheerio.load(html);
@@ -111,26 +147,50 @@ async function fetchProgramData(sosok: number) {
     // 비차익 순매수 (Non-arbitrage net buy)
     // The table usually has headers, we want the first data row
     const row = $(".type_1 tbody tr").filter((i, el) => $(el).find("td").length > 4).first();
-    const nonArbitrage = parseInt(row.find("td").eq(4).text().replace(/[^0-9-]/g, "")) || 0;
     
-    console.log(`Fetched Program Data (${sosok === 0 ? 'KOSPI' : 'KOSDAQ'}):`, nonArbitrage);
-    return nonArbitrage;
-  } catch (error) {
-    console.error(`Error fetching program data for sosok ${sosok}:`, error);
-    throw error;
+    if (!row.length) {
+      console.error(`[ERROR] No program data row found in HTML for ${marketName}.`);
+      return null;
+    }
+
+    try {
+      const cell = row.find("td").eq(4);
+      if (!cell.length) {
+        console.error(`[ERROR] Failed to find ${marketName} program data cell at index 4`);
+        return null;
+      }
+      const text = cell.text().replace(/[^0-9-]/g, "");
+      if (!text) {
+        console.warn(`[WARN] Empty program data for ${marketName}`);
+        return null;
+      }
+
+      const nonArbitrage = parseInt(text);
+      if (isNaN(nonArbitrage)) {
+        console.error(`[ERROR] Failed to parse ${marketName} program value: "${text}"`);
+        return null;
+      }
+      console.log(`[SUCCESS] Fetched Program Data (${marketName}):`, nonArbitrage);
+      return nonArbitrage;
+    } catch (e: any) {
+      console.error(`[ERROR] Exception while parsing ${marketName} program data:`, e.message);
+      return null;
+    }
+  } catch (error: any) {
+    console.error(`[FATAL] Error fetching program data for ${marketName}:`, error.message);
+    return null;
   }
 }
 
 async function runSnapshot() {
   try {
-    if (!db) {
-      console.error("runSnapshot failed: Firebase not initialized.");
-      return;
-    }
-    const kospiData = await fetchMarketData(0);
-    const kospiProgram = await fetchProgramData(0);
-    const kosdaqData = await fetchMarketData(1);
-    const kosdaqProgram = await fetchProgramData(1);
+    // Fetch all data in parallel
+    const [kospiData, kospiProgram, kosdaqData, kosdaqProgram] = await Promise.all([
+      fetchMarketData(0),
+      fetchProgramData(0),
+      fetchMarketData(1),
+      fetchProgramData(1)
+    ]);
 
     const snapshot = {
       timestamp: Date.now(),
@@ -138,11 +198,19 @@ async function runSnapshot() {
       kosdaq: { ...kosdaqData, program_non_arbitrage: kosdaqProgram }
     };
 
-    // Save to Firestore
-    await db.collection("snapshots").add(snapshot);
-    console.log("Snapshot saved to Firestore.");
+    // Save to Firestore if available
+    if (db) {
+      try {
+        await db.collection("snapshots").add(snapshot);
+        console.log("Snapshot saved to Firestore.");
+      } catch (dbError: any) {
+        console.error("Failed to save snapshot to Firestore:", dbError.message);
+      }
+    } else {
+      console.warn("Skipping Firestore save: Database not initialized.");
+    }
 
-    // Send Telegram Notification
+    // Send Telegram Notification (always try)
     await sendTelegramNotification(snapshot);
   } catch (error) {
     console.error("Error in runSnapshot:", error);
@@ -164,21 +232,29 @@ async function sendTelegramNotification(current: any) {
   }
 
   // Get historical data (30m and 1h ago)
-  const querySnapshot = await db.collection("snapshots")
-    .orderBy("timestamp", "desc")
-    .limit(5)
-    .get();
+  let history: any[] = [];
+  if (db) {
+    try {
+      const querySnapshot = await db.collection("snapshots")
+        .orderBy("timestamp", "desc")
+        .limit(5)
+        .get();
+      history = querySnapshot.docs.map(doc => doc.data());
+    } catch (e) {
+      console.warn("Could not fetch history for Telegram message:", e.message);
+    }
+  }
   
-  const history = querySnapshot.docs.map(doc => doc.data());
-
   const prev30m = history[1]; // 2nd most recent
   const prev1h = history[2];  // 3rd most recent
 
-  const formatValue = (val: number) => (val / 100).toFixed(0); // Assuming values are in 100M KRW (억) or similar. 
-  // Naver Finance values are usually in Million KRW (백만). So / 100 = 100M (억).
+  const formatValue = (val: number | null | undefined) => {
+    if (val === null || val === undefined) return "N/A";
+    return (val / 100).toFixed(0);
+  };
   
-  const getDiff = (curr: number, prev: number | undefined) => {
-    if (prev === undefined) return "N/A";
+  const getDiff = (curr: number | null | undefined, prev: number | null | undefined) => {
+    if (curr === null || curr === undefined || prev === null || prev === undefined) return "N/A";
     const diff = curr - prev;
     return (diff > 0 ? "+" : "") + (diff / 100).toFixed(1);
   };
@@ -231,38 +307,42 @@ app.get("/api/status", async (req, res) => {
       });
     }
 
-    const dbId = (db as any)._databaseId || "unknown";
+    const dbId = db ? ((db as any)._databaseId || "(default)") : "none";
     console.log(`[${new Date().toISOString()}] Attempting to fetch latest snapshot from Firestore (DB: ${dbId})...`);
     
-    // Try a simpler query first if the complex one fails
-    let querySnapshot;
-    try {
-      querySnapshot = await db.collection("snapshots")
-        .orderBy("timestamp", "desc")
-        .limit(1)
-        .get();
-      console.log(`Successfully fetched latest snapshot from ${dbId}. Empty: ${querySnapshot.empty}`);
-    } catch (queryError: any) {
-      console.error(`Complex query failed on ${dbId}, trying simple query:`, queryError.message);
-      // Fallback to simple query without orderBy to see if it's an index issue
-      querySnapshot = await db.collection("snapshots").limit(1).get();
-      console.log(`Simple query result on ${dbId}. Empty: ${querySnapshot.empty}`);
+    let latestSnapshot = null;
+    let dbStatus = "connected";
+
+    if (db) {
+      try {
+        const querySnapshot = await db.collection("snapshots")
+          .orderBy("timestamp", "desc")
+          .limit(1)
+          .get();
+        latestSnapshot = querySnapshot.empty ? null : querySnapshot.docs[0].data();
+        console.log(`Successfully fetched latest snapshot from ${dbId}.`);
+      } catch (queryError: any) {
+        console.error(`Firestore query failed on ${dbId}:`, queryError.message);
+        dbStatus = "error";
+      }
+    } else {
+      dbStatus = "not_initialized";
     }
     
-    const latestSnapshot = querySnapshot.empty ? null : querySnapshot.docs[0].data();
-
     res.json({ 
       status: "running", 
       botConfigured: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID),
       latestSnapshot,
-      databaseId: dbId
+      databaseId: dbId,
+      databaseStatus: dbStatus
     });
   } catch (error: any) {
     console.error("Status fetch error details:", error);
-    res.status(500).json({ 
-      error: `Failed to fetch status: ${error.message}`, 
-      details: error.message,
-      stack: error.stack 
+    res.json({ 
+      status: "running",
+      botConfigured: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID),
+      error: "Database connection failed. Historical data is unavailable.",
+      details: error.message
     });
   }
 });
