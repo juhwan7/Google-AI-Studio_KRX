@@ -1,0 +1,37 @@
+{
+  "entities": {
+    "MarketSnapshot": {
+      "title": "Market Snapshot",
+      "description": "KOSPI/KOSDAQ supply and demand data at a specific point in time",
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "number", "description": "Epoch timestamp" },
+        "kospi": {
+          "type": "object",
+          "properties": {
+            "individual": { "type": "number" },
+            "foreign": { "type": "number" },
+            "institutional": { "type": "number" },
+            "program_non_arbitrage": { "type": "number" }
+          }
+        },
+        "kosdaq": {
+          "type": "object",
+          "properties": {
+            "individual": { "type": "number" },
+            "foreign": { "type": "number" },
+            "institutional": { "type": "number" },
+            "program_non_arbitrage": { "type": "number" }
+          }
+        }
+      },
+      "required": ["timestamp", "kospi", "kosdaq"]
+    }
+  },
+  "firestore": {
+    "/snapshots/{snapshotId}": {
+      "schema": "MarketSnapshot",
+      "description": "Historical snapshots of market data"
+    }
+  }
+}

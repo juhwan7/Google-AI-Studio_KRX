@@ -1,0 +1,5 @@
+{
+  "name": "K-Stock Telegram Bot",
+  "description": "코스피/코스닥 수급 현황을 30분마다 분석하여 텔레그램으로 전송하는 봇입니다.",
+  "requestFramePermissions": []
+}
