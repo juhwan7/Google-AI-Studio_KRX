@@ -1,43 +1,4 @@
-import { useState, useEffect } from "react";
-import { Send, Settings, AlertCircle, CheckCircle2, RefreshCw, BarChart3 } from "lucide-react";
-import { motion } from "motion/react";
-
-export default function App() {
-  const [status, setStatus] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [triggering, setTriggering] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchWithRetry = async (url: string, options: RequestInit = {}, retryCount = 0): Promise<any> => {
-    try {
-      const res = await fetch(url, options);
-      const contentType = res.headers.get("content-type") || "";
-      
-      // If we get HTML instead of JSON, it's likely the platform's "Starting Server" or an error page
-      if (!contentType.includes("application/json")) {
-        const text = await res.text();
-        const lowerText = text.toLowerCase();
-        
-        // Broad detection for any HTML/Platform-level response or server errors
-        const isNotReady = 
-          contentType.includes("text/html") ||
-          lowerText.includes("starting server") || 
-          lowerText.includes("loading") ||
-          lowerText.includes("<!doctype") ||
-          lowerText.includes("<html") ||
-          res.status >= 500 ||
-          res.status === 404; // Sometimes 404 happens briefly during startup
-
-        if (isNotReady && retryCount < 5) {
-          if (retryCount % 1 === 0) {
-            console.log(`[Retry ${retryCount}] Server not ready at ${url} (Status: ${res.status})...`);
-          }
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          return fetchWithRetry(url, options, retryCount + 1);
-        }
-        
-        console.error(`Unexpected response from ${url} (Retry: ${retryCount}):`, text.substring(0, 500));
-        throw new Error(`서버 응답이 JSON이 아닙니다 (Status: ${res.status}, Type: ${contentType}). 서버가 아직 준비되지 않았거나 설정 오류가 있습니다.`);
+## (Status: ${res.status}, Type: ${contentType}). 서버가 아직 준비되지 않았거나 설정 오류가 있습니다.`);
       }
       
       const data = await res.json();
